@@ -12,12 +12,16 @@ from components.header import render_header
 from components.footer import render_footer
 from components.i18n import t
 
+import json
 import feedparser
 import trafilatura
 from datetime import datetime, date
 import time
 import re
 import io
+from streamlit_js_eval import streamlit_js_eval
+
+STORAGE_KEY = "kf-oshi-digest-data"
 
 # --- Header ---
 render_header()
@@ -31,6 +35,33 @@ if "keywords" not in st.session_state:
     st.session_state.keywords = []
 if "expenses" not in st.session_state:
     st.session_state.expenses = []
+
+# --- Load from localStorage ---
+if "data_loaded" not in st.session_state:
+    stored = streamlit_js_eval(js_expressions=f'localStorage.getItem("{STORAGE_KEY}")')
+    if stored and stored != "null":
+        try:
+            loaded = json.loads(stored)
+            if "feed_urls" in loaded:
+                st.session_state.feed_urls = loaded["feed_urls"]
+            if "keywords" in loaded:
+                st.session_state.keywords = loaded["keywords"]
+            if "expenses" in loaded:
+                st.session_state.expenses = loaded["expenses"]
+        except Exception:
+            pass
+    st.session_state.data_loaded = True
+
+
+def save_to_local_storage():
+    """Save feed_urls, keywords, and expenses to browser localStorage."""
+    data = {
+        "feed_urls": st.session_state.feed_urls,
+        "keywords": st.session_state.keywords,
+        "expenses": st.session_state.expenses,
+    }
+    data_json = json.dumps(data, ensure_ascii=False)
+    streamlit_js_eval(js_expressions=f'localStorage.setItem("{STORAGE_KEY}", {json.dumps(data_json)})')
 
 # --- Genre preset feeds ---
 GENRE_PRESETS = {
@@ -156,6 +187,7 @@ with tab_feed:
                             st.session_state.feed_urls.append(url)
                             added += 1
                     if added > 0:
+                        save_to_local_storage()
                         st.rerun()
 
     # Preset examples
@@ -169,11 +201,13 @@ with tab_feed:
         if st.button(t("add_button"), type="primary") and new_url.strip():
             if new_url.strip() not in st.session_state.feed_urls:
                 st.session_state.feed_urls.append(new_url.strip())
+                save_to_local_storage()
                 st.rerun()
     with col_clear:
         if st.button(t("clear_feeds")):
             st.session_state.feed_urls = []
             st.session_state.articles = []
+            save_to_local_storage()
             st.rerun()
 
     # Show registered feeds
@@ -186,6 +220,7 @@ with tab_feed:
             with col2:
                 if st.button("\U0001F5D1", key=f"del_feed_{i}"):
                     st.session_state.feed_urls.pop(i)
+                    save_to_local_storage()
                     st.rerun()
 
         # --- Fetch button ---
@@ -313,6 +348,7 @@ with tab_keywords:
     if st.button(t("keyword_add_button"), type="primary") and new_kw.strip():
         if new_kw.strip() not in st.session_state.keywords:
             st.session_state.keywords.append(new_kw.strip())
+            save_to_local_storage()
             st.rerun()
 
     if st.session_state.keywords:
@@ -324,6 +360,7 @@ with tab_keywords:
             with col2:
                 if st.button("\U0001F5D1", key=f"del_kw_{i}"):
                     st.session_state.keywords.pop(i)
+                    save_to_local_storage()
                     st.rerun()
     else:
         st.info(t("keyword_none"))
@@ -350,6 +387,7 @@ with tab_expense:
                 "amount": amount,
                 "date": expense_date.isoformat(),
             })
+            save_to_local_storage()
             st.rerun()
 
     if st.session_state.expenses:
@@ -388,11 +426,13 @@ with tab_expense:
             with col4:
                 if st.button("\U0001F5D1", key=f"del_exp_{real_idx}"):
                     st.session_state.expenses.pop(real_idx)
+                    save_to_local_storage()
                     st.rerun()
 
         # Clear all expenses
         if st.button(t("expense_clear_all")):
             st.session_state.expenses = []
+            save_to_local_storage()
             st.rerun()
     else:
         st.info(t("expense_none"))
