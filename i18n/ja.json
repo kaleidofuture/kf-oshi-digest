@@ -60,5 +60,6 @@
   "expense_chart_amount": "金額 (円)",
   "expense_history": "支出履歴",
   "expense_clear_all": "支出履歴をすべて削除",
-  "expense_none": "まだ支出の記録がありません。推し活の支出を記録してみましょう。"
+  "expense_none": "まだ支出の記録がありません。推し活の支出を記録してみましょう。",
+  "report_issue": "不具合を報告"
 }

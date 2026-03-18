@@ -60,5 +60,6 @@
   "expense_chart_amount": "Amount",
   "expense_history": "Expense History",
   "expense_clear_all": "Clear All Expenses",
-  "expense_none": "No expenses recorded yet. Start tracking your oshi spending!"
+  "expense_none": "No expenses recorded yet. Start tracking your oshi spending!",
+  "report_issue": "Report an issue"
 }
