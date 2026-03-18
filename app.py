@@ -14,8 +14,9 @@ from components.i18n import t
 
 import feedparser
 import trafilatura
-from datetime import datetime
+from datetime import datetime, date
 import time
+import re
 import io
 
 # --- Header ---
@@ -26,6 +27,54 @@ if "feed_urls" not in st.session_state:
     st.session_state.feed_urls = []
 if "articles" not in st.session_state:
     st.session_state.articles = []
+if "keywords" not in st.session_state:
+    st.session_state.keywords = []
+if "expenses" not in st.session_state:
+    st.session_state.expenses = []
+
+# --- Genre preset feeds ---
+GENRE_PRESETS = {
+    "idol": {
+        "label_key": "genre_idol",
+        "feeds": [
+            ("Natalie Music", "https://natalie.mu/music/feed/news"),
+            ("ORICON NEWS Music", "https://www.oricon.co.jp/news/rss/music/"),
+            ("Billboard Japan", "https://www.billboard-japan.com/rss/news"),
+        ],
+    },
+    "anime": {
+        "label_key": "genre_anime",
+        "feeds": [
+            ("Anime News Network", "https://www.animenewsnetwork.com/all/rss.xml"),
+            ("Natalie Comic", "https://natalie.mu/comic/feed/news"),
+            ("Anime! Anime!", "https://animeanime.jp/rss/index.rdf"),
+        ],
+    },
+    "seiyuu": {
+        "label_key": "genre_seiyuu",
+        "feeds": [
+            ("Seiyuu Grand Prix Web", "https://seigura.com/feed/"),
+            ("animate Times Voice Actor", "https://www.animatetimes.com/tag/seiyuu/rss.php"),
+            ("Cho Animedia", "https://cho-animedia.jp/feed/"),
+        ],
+    },
+    "vtuber": {
+        "label_key": "genre_vtuber",
+        "feeds": [
+            ("MoguLive", "https://www.moguravr.com/feed/"),
+            ("Kai-You VTuber", "https://kai-you.net/rss/category/vtuber"),
+            ("Panora VR", "https://panora.tokyo/feed"),
+        ],
+    },
+    "game": {
+        "label_key": "genre_game",
+        "feeds": [
+            ("4Gamer.net", "https://www.4gamer.net/rss/index.xml"),
+            ("Famitsu", "https://www.famitsu.com/feed/"),
+            ("Game Watch", "https://game.watch.impress.co.jp/data/rss/1.0/gmw/feed.rdf"),
+        ],
+    },
+}
 
 
 def parse_feed(url: str) -> list[dict]:
@@ -70,130 +119,283 @@ def extract_body(url: str) -> str | None:
     return None
 
 
-# --- Feed URL input ---
-st.subheader(t("input_title"))
-st.caption(t("input_help"))
+def matches_keywords(article: dict, keywords: list[str]) -> bool:
+    """Check if an article title or summary matches any keyword."""
+    if not keywords:
+        return False
+    text = (article.get("title", "") + " " + article.get("summary", "")).lower()
+    return any(kw.lower() in text for kw in keywords)
 
-# Preset examples
-with st.expander(t("preset_title")):
-    st.markdown(t("preset_examples"))
 
-new_url = st.text_input(t("url_label"), placeholder="https://example.com/feed.xml")
+# =============================================================
+# TAB LAYOUT
+# =============================================================
+tab_feed, tab_keywords, tab_expense = st.tabs([
+    t("tab_feeds"),
+    t("tab_keywords"),
+    t("tab_expense"),
+])
 
-col_add, col_clear = st.columns([1, 1])
-with col_add:
-    if st.button(t("add_button"), type="primary") and new_url.strip():
-        if new_url.strip() not in st.session_state.feed_urls:
-            st.session_state.feed_urls.append(new_url.strip())
-            st.rerun()
-with col_clear:
-    if st.button(t("clear_feeds")):
-        st.session_state.feed_urls = []
-        st.session_state.articles = []
-        st.rerun()
+# =============================================================
+# TAB 1: FEEDS & ARTICLES
+# =============================================================
+with tab_feed:
+    st.subheader(t("input_title"))
+    st.caption(t("input_help"))
 
-# Show registered feeds
-if st.session_state.feed_urls:
-    st.markdown(f"**{t('registered_feeds')}** ({len(st.session_state.feed_urls)})")
-    for i, url in enumerate(st.session_state.feed_urls):
-        col1, col2 = st.columns([5, 1])
-        with col1:
-            st.caption(url)
-        with col2:
-            if st.button("\U0001F5D1", key=f"del_feed_{i}"):
-                st.session_state.feed_urls.pop(i)
+    # --- Genre presets ---
+    with st.expander(t("genre_preset_title"), expanded=False):
+        st.markdown(t("genre_preset_help"))
+        cols = st.columns(len(GENRE_PRESETS))
+        for idx, (genre_key, preset) in enumerate(GENRE_PRESETS.items()):
+            with cols[idx]:
+                if st.button(t(preset["label_key"]), key=f"genre_{genre_key}", use_container_width=True):
+                    added = 0
+                    for name, url in preset["feeds"]:
+                        if url not in st.session_state.feed_urls:
+                            st.session_state.feed_urls.append(url)
+                            added += 1
+                    if added > 0:
+                        st.rerun()
+
+    # Preset examples
+    with st.expander(t("preset_title")):
+        st.markdown(t("preset_examples"))
+
+    new_url = st.text_input(t("url_label"), placeholder="https://example.com/feed.xml")
+
+    col_add, col_clear = st.columns([1, 1])
+    with col_add:
+        if st.button(t("add_button"), type="primary") and new_url.strip():
+            if new_url.strip() not in st.session_state.feed_urls:
+                st.session_state.feed_urls.append(new_url.strip())
                 st.rerun()
+    with col_clear:
+        if st.button(t("clear_feeds")):
+            st.session_state.feed_urls = []
+            st.session_state.articles = []
+            st.rerun()
 
-    # --- Fetch button ---
-    if st.button(t("fetch_button"), type="primary"):
-        all_articles = []
-        progress = st.progress(0, text=t("fetching"))
-
+    # Show registered feeds
+    if st.session_state.feed_urls:
+        st.markdown(f"**{t('registered_feeds')}** ({len(st.session_state.feed_urls)})")
         for i, url in enumerate(st.session_state.feed_urls):
-            progress.progress(
-                (i + 1) / len(st.session_state.feed_urls),
-                text=t("fetching_feed").format(num=i + 1, total=len(st.session_state.feed_urls)),
-            )
-            articles = parse_feed(url)
-            all_articles.extend(articles)
+            col1, col2 = st.columns([5, 1])
+            with col1:
+                st.caption(url)
+            with col2:
+                if st.button("\U0001F5D1", key=f"del_feed_{i}"):
+                    st.session_state.feed_urls.pop(i)
+                    st.rerun()
 
-        # Sort by date (newest first), None dates go to end
-        all_articles.sort(
-            key=lambda a: a["published"] or datetime.min,
-            reverse=True,
+        # --- Fetch button ---
+        if st.button(t("fetch_button"), type="primary"):
+            all_articles = []
+            progress = st.progress(0, text=t("fetching"))
+
+            for i, url in enumerate(st.session_state.feed_urls):
+                progress.progress(
+                    (i + 1) / len(st.session_state.feed_urls),
+                    text=t("fetching_feed").format(num=i + 1, total=len(st.session_state.feed_urls)),
+                )
+                articles = parse_feed(url)
+                all_articles.extend(articles)
+
+            # Sort by date (newest first), None dates go to end
+            all_articles.sort(
+                key=lambda a: a["published"] or datetime.min,
+                reverse=True,
+            )
+
+            st.session_state.articles = all_articles
+            progress.empty()
+            st.rerun()
+
+    # --- Display articles ---
+    if st.session_state.articles:
+        articles = st.session_state.articles
+        keywords = st.session_state.keywords
+
+        # Separate keyword-matched and others
+        matched = [a for a in articles if matches_keywords(a, keywords)]
+        unmatched = [a for a in articles if not matches_keywords(a, keywords)]
+        sorted_articles = matched + unmatched
+
+        # --- Summary card ---
+        st.markdown("---")
+        summary_cols = st.columns(3)
+        with summary_cols[0]:
+            st.metric(t("summary_total"), len(articles))
+        with summary_cols[1]:
+            st.metric(t("summary_keyword_match"), len(matched))
+        with summary_cols[2]:
+            feed_count = len(set(a["feed_title"] for a in articles))
+            st.metric(t("summary_sources"), feed_count)
+        st.markdown("---")
+
+        # Option to extract full text
+        extract_full = st.checkbox(t("extract_full_text"))
+
+        for i, article in enumerate(sorted_articles):
+            is_matched = matches_keywords(article, keywords)
+            date_str = article["published"].strftime("%Y-%m-%d %H:%M") if article["published"] else "-"
+            badge = " \U0001F31F" if is_matched else ""
+            label = f"[{date_str}] {article['title']}  ({article['feed_title']}){badge}"
+
+            with st.expander(label):
+                if is_matched:
+                    matched_kws = [kw for kw in keywords if kw.lower() in (article.get("title", "") + " " + article.get("summary", "")).lower()]
+                    st.info(t("keyword_matched_label").format(keywords=", ".join(matched_kws)))
+
+                if article["link"]:
+                    st.markdown(f"[{t('open_link')}]({article['link']})")
+
+                # Show summary
+                if article["summary"]:
+                    clean_summary = re.sub(r"<[^>]+>", "", article["summary"])
+                    if len(clean_summary) > 500:
+                        clean_summary = clean_summary[:500] + "..."
+                    st.markdown(clean_summary)
+
+                # Extract full text on demand
+                if extract_full and article["link"]:
+                    if st.button(t("extract_button"), key=f"extract_{i}"):
+                        with st.spinner(t("extracting")):
+                            body = extract_body(article["link"])
+                            if body:
+                                st.text_area(
+                                    t("full_text"),
+                                    body[:3000],
+                                    height=200,
+                                    key=f"body_{i}",
+                                )
+                            else:
+                                st.warning(t("extract_failed"))
+
+        # --- Export ---
+        st.markdown("---")
+        export_lines = []
+        for article in sorted_articles:
+            date_str = article["published"].strftime("%Y-%m-%d %H:%M") if article["published"] else "-"
+            kw_tag = " [KEYWORD MATCH]" if matches_keywords(article, keywords) else ""
+            export_lines.append(f"[{date_str}] {article['title']}{kw_tag}")
+            export_lines.append(f"  Source: {article['feed_title']}")
+            export_lines.append(f"  URL: {article['link']}")
+            if article["summary"]:
+                clean = re.sub(r"<[^>]+>", "", article["summary"])
+                if len(clean) > 300:
+                    clean = clean[:300] + "..."
+                export_lines.append(f"  {clean}")
+            export_lines.append("")
+
+        export_text = "\n".join(export_lines)
+
+        st.download_button(
+            label=t("export_button"),
+            data=export_text.encode("utf-8"),
+            file_name="oshi_digest.txt",
+            mime="text/plain",
         )
 
-        st.session_state.articles = all_articles
-        progress.empty()
-        st.rerun()
+    elif st.session_state.feed_urls:
+        st.info(t("ready_to_fetch"))
+    else:
+        st.info(t("no_feeds"))
 
-# --- Display articles ---
-if st.session_state.articles:
-    articles = st.session_state.articles
-    st.success(t("found_articles").format(count=len(articles)))
+# =============================================================
+# TAB 2: KEYWORD FILTER
+# =============================================================
+with tab_keywords:
+    st.subheader(t("keyword_title"))
+    st.caption(t("keyword_help"))
 
-    # Option to extract full text
-    extract_full = st.checkbox(t("extract_full_text"))
+    new_kw = st.text_input(t("keyword_input_label"), placeholder=t("keyword_placeholder"))
+    if st.button(t("keyword_add_button"), type="primary") and new_kw.strip():
+        if new_kw.strip() not in st.session_state.keywords:
+            st.session_state.keywords.append(new_kw.strip())
+            st.rerun()
 
-    for i, article in enumerate(articles):
-        date_str = article["published"].strftime("%Y-%m-%d %H:%M") if article["published"] else "-"
-        with st.expander(f"[{date_str}] {article['title']}  ({article['feed_title']})"):
-            if article["link"]:
-                st.markdown(f"[{t('open_link')}]({article['link']})")
+    if st.session_state.keywords:
+        st.markdown(f"**{t('keyword_registered')}**")
+        for i, kw in enumerate(st.session_state.keywords):
+            col1, col2 = st.columns([5, 1])
+            with col1:
+                st.markdown(f"`{kw}`")
+            with col2:
+                if st.button("\U0001F5D1", key=f"del_kw_{i}"):
+                    st.session_state.keywords.pop(i)
+                    st.rerun()
+    else:
+        st.info(t("keyword_none"))
 
-            # Show summary
-            if article["summary"]:
-                # Strip HTML tags from summary
-                import re
-                clean_summary = re.sub(r"<[^>]+>", "", article["summary"])
-                if len(clean_summary) > 500:
-                    clean_summary = clean_summary[:500] + "..."
-                st.markdown(clean_summary)
+# =============================================================
+# TAB 3: EXPENSE TRACKER
+# =============================================================
+with tab_expense:
+    st.subheader(t("expense_title"))
+    st.caption(t("expense_help"))
 
-            # Extract full text on demand
-            if extract_full and article["link"]:
-                if st.button(t("extract_button"), key=f"extract_{i}"):
-                    with st.spinner(t("extracting")):
-                        body = extract_body(article["link"])
-                        if body:
-                            st.text_area(
-                                t("full_text"),
-                                body[:3000],
-                                height=200,
-                                key=f"body_{i}",
-                            )
-                        else:
-                            st.warning(t("extract_failed"))
+    with st.form("expense_form", clear_on_submit=True):
+        exp_cols = st.columns([3, 2, 2])
+        with exp_cols[0]:
+            item_name = st.text_input(t("expense_item"), placeholder=t("expense_item_placeholder"))
+        with exp_cols[1]:
+            amount = st.number_input(t("expense_amount"), min_value=0, step=100, value=0)
+        with exp_cols[2]:
+            expense_date = st.date_input(t("expense_date"), value=date.today())
+        submitted = st.form_submit_button(t("expense_add_button"), type="primary")
+        if submitted and item_name.strip() and amount > 0:
+            st.session_state.expenses.append({
+                "item": item_name.strip(),
+                "amount": amount,
+                "date": expense_date.isoformat(),
+            })
+            st.rerun()
 
-    # --- Export ---
-    st.markdown("---")
-    export_lines = []
-    for article in articles:
-        date_str = article["published"].strftime("%Y-%m-%d %H:%M") if article["published"] else "-"
-        export_lines.append(f"[{date_str}] {article['title']}")
-        export_lines.append(f"  Source: {article['feed_title']}")
-        export_lines.append(f"  URL: {article['link']}")
-        if article["summary"]:
-            import re
-            clean = re.sub(r"<[^>]+>", "", article["summary"])
-            if len(clean) > 300:
-                clean = clean[:300] + "..."
-            export_lines.append(f"  {clean}")
-        export_lines.append("")
+    if st.session_state.expenses:
+        # Monthly totals for bar chart
+        monthly = {}
+        for exp in st.session_state.expenses:
+            month_key = exp["date"][:7]  # YYYY-MM
+            monthly[month_key] = monthly.get(month_key, 0) + exp["amount"]
 
-    export_text = "\n".join(export_lines)
+        # Current month total
+        current_month = date.today().strftime("%Y-%m")
+        current_total = monthly.get(current_month, 0)
+        st.metric(t("expense_monthly_total").format(month=current_month), f"\U000000A5{current_total:,}")
 
-    st.download_button(
-        label=t("export_button"),
-        data=export_text.encode("utf-8"),
-        file_name="oshi_digest.txt",
-        mime="text/plain",
-    )
+        # Bar chart
+        if monthly:
+            import pandas as pd
+            chart_data = pd.DataFrame(
+                list(monthly.items()),
+                columns=[t("expense_chart_month"), t("expense_chart_amount")],
+            )
+            chart_data = chart_data.sort_values(t("expense_chart_month"))
+            st.bar_chart(chart_data, x=t("expense_chart_month"), y=t("expense_chart_amount"))
 
-elif st.session_state.feed_urls:
-    st.info(t("ready_to_fetch"))
-else:
-    st.info(t("no_feeds"))
+        # Expense list
+        st.markdown(f"**{t('expense_history')}**")
+        for i, exp in enumerate(reversed(st.session_state.expenses)):
+            real_idx = len(st.session_state.expenses) - 1 - i
+            col1, col2, col3, col4 = st.columns([3, 2, 2, 1])
+            with col1:
+                st.text(exp["item"])
+            with col2:
+                st.text(f"\U000000A5{exp['amount']:,}")
+            with col3:
+                st.text(exp["date"])
+            with col4:
+                if st.button("\U0001F5D1", key=f"del_exp_{real_idx}"):
+                    st.session_state.expenses.pop(real_idx)
+                    st.rerun()
+
+        # Clear all expenses
+        if st.button(t("expense_clear_all")):
+            st.session_state.expenses = []
+            st.rerun()
+    else:
+        st.info(t("expense_none"))
 
 # --- Footer ---
 render_footer(libraries=["feedparser", "trafilatura"])
