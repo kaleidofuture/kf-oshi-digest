@@ -398,4 +398,4 @@ with tab_expense:
         st.info(t("expense_none"))
 
 # --- Footer ---
-render_footer(libraries=["feedparser", "trafilatura"])
+render_footer(libraries=["feedparser", "trafilatura"], repo_name="kf-oshi-digest")
