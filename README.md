@@ -1,3 +1,14 @@
+---
+title: kf-oshi-digest
+emoji: 🚀
+colorFrom: green
+colorTo: blue
+sdk: streamlit
+sdk_version: 1.44.1
+app_file: app.py
+pinned: false
+---
+
 # KF-OshiDigest
 
 > 推しの最新情報をRSSで一括チェックしてダイジェスト化する。
